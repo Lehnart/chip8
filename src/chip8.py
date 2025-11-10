@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import random
 from font import DEFAULT_FONT
 import time
 import ctypes
@@ -115,7 +116,7 @@ class Chip8:
         self.inputs[3][3] = keys[pygame.K_v]
 
     def emulate(self):
-        if time.time() - self.last_execution > 1./10.:
+        if time.time() - self.last_execution > 1./1000.:
             logger.debug("fetch code")
             op = self.fetch()
             logger.debug("op " + hex(op))
@@ -146,9 +147,33 @@ class Chip8:
             logger.debug("Clear screen")
             self.clear_screen()
 
+        elif instruction.op == 0x00EE:
+            logger.debug("Return from subroutine")
+            self.pc = self.stack.pop()
+
         elif instruction.operand == 0x1 :
             logger.debug("Jump to instruction " + str(instruction.nnn))
             self.pc = instruction.nnn
+
+        elif instruction.operand == 0x2 :
+            logger.debug("Call subroutine at " + str(instruction.nnn))
+            self.stack.append(self.pc)
+            self.pc = instruction.nnn
+
+        elif instruction.operand == 0x3 :
+            logger.debug("Conditional skip 3")
+            if self.variable_registers[instruction.x] == instruction.nn :
+                self.pc += 2
+
+        elif instruction.operand == 0x4 :
+            logger.debug("Conditional skip 4")
+            if self.variable_registers[instruction.x] != instruction.nn :
+                self.pc += 2
+
+        elif instruction.operand == 0x5 :
+            logger.debug("Conditional skip 5")
+            if self.variable_registers[instruction.x] == self.variable_registers[instruction.y] :
+                self.pc += 2
 
         elif instruction.operand == 0x6 :
             logger.debug("Set register " + str(instruction.x) + " to " + str(instruction.nn))
@@ -157,11 +182,72 @@ class Chip8:
         elif instruction.operand == 0x7 :
             logger.debug("Add to register " + str(instruction.x) + " the value " + str(instruction.nn))
             self.variable_registers[instruction.x] += instruction.nn
+            self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
 
-        elif instruction.operand == 0xa :
+        elif instruction.operand == 0x8 :
+            if instruction.n == 0 : 
+                logger.debug("Set" )
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.y]
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
+            elif instruction.n == 1 : 
+                logger.debug("Binary OR" )
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] | self.variable_registers[instruction.y]
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
+            elif instruction.n == 2 : 
+                logger.debug("Binary AND" )
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] & self.variable_registers[instruction.y]
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
+            elif instruction.n == 3 : 
+                logger.debug("Binary XOR" )
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] ^ self.variable_registers[instruction.y]
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
+            elif instruction.n == 4 : 
+                logger.debug("Add" )
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] + self.variable_registers[instruction.y]
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
+            elif instruction.n == 5 : 
+                logger.debug("Sub vx - vy" )
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] - self.variable_registers[instruction.y]
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256 
+            elif instruction.n == 6 : 
+                logger.debug("Shift right" )
+                #self.variable_registers[instruction.x] = self.variable_registers[instruction.y]
+                lsb = self.variable_registers[instruction.x] & 1
+                if lsb == 1 :
+                    self.variable_registers[-1] = 1 
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] >> 1 
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
+            elif instruction.n == 7 : 
+                logger.debug("Sub vy - vx" )
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.y] - self.variable_registers[instruction.x]
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
+
+            elif instruction.n == 0xE : 
+                logger.debug("Shift Left" )
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.y]
+                msb = (self.variable_registers[instruction.x] >> 7) & 1
+                if msb == 1 :
+                    self.variable_registers[-1] = 1 
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] << 1 
+                self.variable_registers[instruction.x] = self.variable_registers[instruction.x] % 256
+
+        elif instruction.operand == 0x9 :
+            logger.debug("Conditional skip 9")
+            if self.variable_registers[instruction.x] != self.variable_registers[instruction.y] :
+                self.pc += 2
+
+        elif instruction.operand == 0xA :
             logger.debug("Set index register to " + str(instruction.nnn))
             self.index_register = instruction.nnn
 
+        elif instruction.operand == 0xB :
+            logger.debug("Jump with offset ")
+            self.index_register = instruction.nnn + self.variable_registers[0]
+
+        elif instruction.operand == 0xC :
+            logger.debug("Random ")
+            self.variable_registers[instruction.x] = random.randint(0, 32768) & instruction.nn
+             
         elif instruction.operand == 0xD :
             logger.debug("Draw sprite ")
             x = self.variable_registers[instruction.x] % 64
@@ -169,8 +255,16 @@ class Chip8:
             self.variable_registers[-1] = 0
             self.draw_sprite(instruction, x, y)
 
+        elif instruction.operand == 0xE :
+            logger.debug("Skip if key")
+            x = self.variable_registers[instruction.x] % 64
+            y = self.variable_registers[instruction.y] % 32
+            self.variable_registers[-1] = 0
+            self.draw_sprite(instruction, x, y)
+
         else :
-            raise Exception("UNKNOWN INSTRUCTION " + str(hex(instruction.op)) )
+            pass
+            #raise Exception("UNKNOWN INSTRUCTION " + str(hex(instruction.op)) )
 
     def draw_sprite(self, instruction:Instruction, cx, cy):
         x = cx 
